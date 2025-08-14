@@ -38,101 +38,142 @@ class AstroPix(Satellite):
             os.mkdir(self.outdir)
         self.chip_config = config["chip_config"]
         self.chip_version = config["chip_version"]
-        self.inject_row = config.setdefault("inject_row", None)
-        self.inject_col = config.setdefault("inject_col", None)
-        self.inject = (self.inject_row, self.inject_col) if self.inject_row is not None and self.inject_col is not None else None
+        self.injection_row = config.setdefault("injection_row", None)
+        self.injection_col = config.setdefault("injection_col", None)
+        self.inject = (self.injection_row, self.injection_col) if self.injection_row is not None and self.injection_col is not None else None
         self.injection_voltage = config.setdefault("injection_voltage", None)
+        self.injection_period = config.setdefault("injection_period", 100)
+        self.injection_clkdiv = config.setdefault("injection_clkdiv", 300)
+        self.injection_initdelay = config.setdefault("injection_initdelay", 100)
+        self.injection_cycle = config.setdefault("injection_cycle", 0)
+        self.injection_pulsesperset = config.setdefault("injection_pulsesperset", 1)
         self.analog = config.setdefault("analog", 0)
         self.threshold = config.setdefault("threshold", None)
         self.injection_onchip = config.setdefault("injection_onchip", True)
         self.newfilter = config.setdefault("newfilter", False)
         self.warmup = config.setdefault("warmup", True)
+        self.threshold_pmos = config.setdefault("threshold_pmos", 1100)
         if hasattr(self, 'astro'):
             self.astro.close_connection()
         self.astro = astropixRun(chipversion=self.chip_version, inject=self.inject)
         self.log.debug(f'Configuration:\n {json.dumps(config.get_dict(), indent=1)}')
 
-    def do_launching(self) -> str:
+    def configure_astropix(self):
         self.astro.asic_init(yaml=self.chip_config, analog_col = self.analog)
-        self.astro.init_voltages(vthreshold=self.threshold)
+        self.astro.init_voltages(vthreshold=self.threshold, dacvals = (8, [self.threshold_pmos/1000, 0, 1.1, 1, 0, 0, 1, self.threshold/1000]))
         #If injection, ensure injection pixel is enabled and initialize
         if self.inject is not None:
             self.log.debug(f'Enabling pixel {self.inject}')
             self.astro.enable_pixel(self.inject[1], self.inject[0])
-            self.astro.init_injection(inj_voltage=self.injection_voltage, onchip=self.injection_onchip)
+            self.astro.init_injection(inj_voltage=self.injection_voltage, onchip=self.injection_onchip, inj_period=self.injection_period, clkdiv=self.injection_clkdiv, initdelay=self.injection_initdelay, cycle=self.injection_cycle, pulseperset=self.injection_pulsesperset)
         self.astro.enable_spi()
         self.astro.asic_configure()
         if self.chip_version == 4:
             self.astro.update_asic_tdac_row(0)
         self.finalize_config()
         self.astro.dump_fpga()
+
+    def do_launching(self) -> str:
+        self.configure_astropix()
         return f"AstroPix is configured"
 
-    def do_reconfigure(self, partial_config: Configuration) -> str:
+    def do_reconfigure(self, partial_config) -> str:
         call_asic_init = False
-        if "outfile_suffix" in partial_config:
+        if "outfile_suffix" in partial_config.get_keys():
             self.outfile_suffix = partial_config["outfile_suffix"]
             self.log.info(f"New suffix for the output files: {self.outfile_suffix}")
-
-        if "outdir" in partial_config:
+        if "outdir" in partial_config.get_keys():
             self.outdir = partial_config["outdir"]
             if os.path.exists(self.outdir) == False:
                 os.mkdir(self.outdir)
             self.log.info(f"New directory for the output files: {self.outdir}")
 
-        if "chip_config" in partial_config:
+        if "chip_config" in partial_config.get_keys():
             self.chip_config = partial_config["chip_config"]
             call_asic_init = True
             self.log.info(f"New config for the chip: {self.chip_config}")
 
-        if "analog" in partial_config:
+        if "analog" in partial_config.get_keys():
             self.analog = partial_config["analog"]
             call_asic_init = True
+            self.astro.asic.enable_ampout_col(self.analog)
             self.log.info(f"New analog output column: {self.analog}")
 
-        if "chip_version" in partial_config:
+        if "chip_version" in partial_config.get_keys():
             raise ValueError("Reconfiguring chip version is not possible")
 
-        if "inject_row" in partial_config or inject_col in partial_config:
-            if "inject_row" in partial_config:
-                self.inject_row = partial_config["inject_row"]
-            if "inject_col" in partial_config:
-                self.inject_col = partial_config["inject_col"]
-            new_inject = (self.inject_row, self.inject_col) if self.inject_row is not None and self.inject_col is not None else None
-            if new_inject == self.inject:
-                self.log.warning(f"Injection pixel not changed from {self.inject}, check if the config is correct")
-            else:
-                self.log.info(f"Injection pixel changed from {self.inject} to {new_inject}")
-                self.inject = new_inject
-                self.astro.injection_row = self.inject_row
-                self.astro.injection_col = self.inject_col
-                call_asic_init = True
-
-        if "injection_voltage" in partial_config:
-            self.injection_voltage = partial_config["injection_voltage"]
+        if "injection_row" in partial_config.get_keys() or "injection_col" in partial_config.get_keys():
+            if "injection_row" in partial_config.get_keys():
+                self.injection_row = partial_config["injection_row"]
+            if "injection_col" in partial_config.get_keys():
+                self.injection_col = partial_config["injection_col"]
+            new_inject = (self.injection_row, self.injection_col) if self.injection_row is not None and self.injection_col is not None else None
+            self.log.info(f"New injection pixel is {new_inject} (old: {self.inject})")
+            if self.inject is not None:
+                self.astro.disable_pixel(self.inject[1], self.inject[0])
+            self.inject = new_inject
+            if self.inject is not None:
+                self.astro.injection_row = self.injection_row
+                self.astro.injection_col = self.injection_col
+                self.astro.enable_pixel(self.inject[1], self.inject[0])
+                self.astro.enable_injection(self.inject[1], self.inject[0])
             call_asic_init = True
-            self.log.info(f"New injection_voltage: {self.injection_voltage} {self.injection_voltage < 5 : 'V' else 'mV'}")
 
-        if "threshold" in partial_config:
+        call_init_injection = False
+        if "injection_voltage" in partial_config.get_keys():
+            self.injection_voltage = partial_config["injection_voltage"]
+            call_init_injection = True
+            self.log.info(f"New injection voltage: {self.injection_voltage}")
+
+        if "injection_period" in partial_config.get_keys():
+            self.injection_period = partial_config["injection_period"]
+            call_init_injection = True
+            self.log.info(f"New injection period: {self.injection_period}")
+
+        if "injection_clkdiv" in partial_config.get_keys():
+            self.injection_clkdiv = partial_config["injection_clkdiv"]
+            call_init_injection = True
+            self.log.info(f"New injection clkdiv: {self.injection_clkdiv}")
+
+        if "injection_initdelay" in partial_config.get_keys():
+            self.injection_initdelay = partial_config["injection_initdelay"]
+            call_init_injection = True
+            self.log.info(f"New injection initdelay: {self.injection_initdelay}")
+
+        if "injection_cycle" in partial_config.get_keys():
+            self.injection_cycle = partial_config["injection_cycle"]
+            call_init_injection = True
+            self.log.info(f"New injection cycle: {self.injection_cycle}")
+
+        if "injection_pulsesperset" in partial_config.get_keys():
+            self.injection_pulsesperset = partial_config["injection_pulsesperset"]
+            call_init_injection = True
+            self.log.info(f"New injection pulsesperset: {self.injection_pulsesperset}")
+
+        if call_init_injection:
+            self.astro.init_injection(inj_voltage=self.injection_voltage, onchip=self.injection_onchip, inj_period=self.injection_period, clkdiv=self.injection_clkdiv, initdelay=self.injection_initdelay, cycle=self.injection_cycle, pulseperset=self.injection_pulsesperset)
+
+        call_init_voltages = False
+        if "threshold" in partial_config.get_keys():
             self.threshold = partial_config["threshold"]
-            self.astro.init_voltages(vthreshold=self.threshold)
-            self.log.info(f"New threshold: {self.threshold} {self.threshold < 5 : 'V' else 'mV'}")
+            call_init_voltages = True
+            self.log.info(f"New threshold: {self.threshold}")
 
-        if "injection_onchip" in partial_config:
+        if "threshold_pmos" in partial_config.get_keys():
+            self.threshold_pmos = partial_config["threshold_pmos"]
+            call_init_voltages = True
+            self.log.info(f"New threshold_pmos: {self.threshold_pmos}")
+
+        if call_init_voltages:
+            self.astro.init_voltages(vthreshold=self.threshold, dacvals=(8, [self.threshold_pmos/1000, 0, 1.1, 1, 0, 0, 1, self.threshold/1000]))
+
+        if "injection_onchip" in partial_config.get_keys():
             raise ValueError("Reconfiguring the source of injection (on chip/through the injection board) is not possible")
 
-        if call_asic_init:
-            self.log.info("Reinitializing the chip")
-            self.astro.asic_init(yaml=self.chip_config, analog_col = self.analog)
-            if self.inject is not None:
-                self.astro.enable_pixel(self.inject[1], self.inject[0])
-                self.astro.init_injection(inj_voltage=self.injection_voltage, onchip=self.injection_onchip)
-            self.astro.enable_spi()
-            self.astro.asic_configure()
-            if self.chip_version == 4:
-                self.astro.update_asic_tdac_row(0)
+        # if call_asic_init:
+        self.log.info(f"Reinitializing the chip")
+        self.astro.asic_update()
         self.finalize_config()
-        self.astro.dump_fpga()
         return "AstroPix is reinitialized"
 
     def do_landing(self) -> str:
@@ -148,14 +189,11 @@ class AstroPix(Satellite):
         return "Nothing is done, AstroPix is unstoppable"
 
     def do_run(self, payload: any) -> str:
-        i = 0
         while not self._state_thread_evt.is_set():
             readout = self.astro.get_readout()
             if readout: #if there is data contained in the readout stream
-                # Writes the hex version to hits
-                self.bitfile.write(f"{i}\t{str(binascii.hexlify(readout))}\n")
-                self.bitfile.flush() #make it simulate streaming
-                i += 1
+                self.bitfile.write(len(readout).to_bytes(2, byteorder='big'))
+                self.bitfile.write(readout)
         return "Finished data acquisition"
 
     def finalize_config(self):
@@ -172,13 +210,9 @@ class AstroPix(Satellite):
 
         # Prepare text files/logs
         fname = "" if not self.outfile_suffix else self.outfile_suffix + "_"
-        bitpath = self.outdir + '/' + fname + time_config + '.log'
+        bitpath = self.outdir + '/' + fname + time_config + '.bin'
         # textfiles are always saved so we open it up
         if hasattr(self, 'bitfile'):
             self.bitfile.close()
-        self.bitfile = open(bitpath, 'w')
-        # Writes all the config information to the file
-        self.bitfile.write(self.astro.get_log_header())
-        self.bitfile.write(self.config.get_json())
-        self.bitfile.write("\n")
+        self.bitfile = open(bitpath, 'wb')
         self.log.info(f'Bitfile with data: {bitpath}')
