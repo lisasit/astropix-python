@@ -1,14 +1,14 @@
 """
 Central module of astropix. This incorporates all of the various modules from the original 'module' directory backend (now 'core')
-The class methods of all the other modules/cores are inherited here. 
+The class methods of all the other modules/cores are inherited here.
 
 Author: Autumn Bauman
 Maintained by: Amanda Steinhebel, amanda.l.steinhebel@nasa.gov
 """
-# Needed modules. They all import their own suppourt libraries, 
+# Needed modules. They all import their own suppourt libraries,
 # and eventually there will be a list of which ones are needed to run
 from typing import Dict
-from core.spi import Spi 
+from core.spi import Spi
 from core.nexysio import Nexysio
 from core.decode import Decode
 from core.injectionboard import Injectionboard
@@ -29,11 +29,11 @@ logger = logging.getLogger(__name__)
 class astropixRun:
 
     # Init just opens the chip and gets the handle. After this runs
-    # asic_config also needs to be called to set it up. Seperating these 
-    # allows for simpler specifying of values. 
+    # asic_config also needs to be called to set it up. Seperating these
+    # allows for simpler specifying of values.
     def __init__(self, chipversion=2, inject:int = None, offline:bool=False):
         """
-        Initalizes astropix object. 
+        Initalizes astropix object.
         No required arguments
         Optional:
         inject:bool - if set to True will enable injection for the whole array.
@@ -43,7 +43,7 @@ class astropixRun:
         # _asic_start tracks if the inital configuration has been run on the ASIC yet.
         # By not handeling this in the init it simplifies the function, making it simpler
         # to put in custom configurations and allows for less writing to the chip,
-        # only doing it once at init or when settings need to be changed as opposed to 
+        # only doing it once at init or when settings need to be changed as opposed to
         # each time a parameter is changed.
 
         if offline:
@@ -55,8 +55,8 @@ class astropixRun:
             self._asic_start = False
             self.nexys = Nexysio()
             self._wait_progress(2)
-            self.handle = self.nexys.autoopen() 
-                
+            self.handle = self.nexys.autoopen()
+
             # Ensure it is working
             logger.info("Opened FPGA, testing...")
             self._test_io()
@@ -101,23 +101,22 @@ class astropixRun:
             except yaml.YAMLError as exc:
                 logger.error(exc)
                 raise
-        
+
 
 ##################### ASIC METHODS FOR USERS #########################
 
-    # Method to initalize the asic. This is taking the place of asic.py. 
+    # Method to initalize the asic. This is taking the place of asic.py.
     # All of the interfacing is handeled through asic_update
     def asic_init(self, yaml:str = None, dac_setup: dict = None, bias_setup:dict = None, analog_col:int = None):
         """
         self.asic_init() - initalize the asic configuration. Must be called first
         Positional arguments: None
         Optional:
-        dac_setup: dict - dictionary of values passed to the configuration, voltage OR current DAC. Only needs values diffent from defaults        
+        dac_setup: dict - dictionary of values passed to the configuration, voltage OR current DAC. Only needs values diffent from defaults
         bias_setup: dict - dict of values for the bias configuration Only needs key/vals for changes from default
-        blankmask: bool - Create a blank mask (everything disabled). Pixels can be enabled manually 
-        analog_col: int - Sets a column to readout analog data from. 
+        blankmask: bool - Create a blank mask (everything disabled). Pixels can be enabled manually
+        analog_col: int - Sets a column to readout analog data from.
         """
-
         # Now that the asic has been initalized we can go and make this true
         self._asic_start = True
 
@@ -133,8 +132,8 @@ class astropixRun:
         except Exception:
             logger.error('Must pass a configuration file in the form of *.yml - check the path/file name')
             raise
-        #Chip config stored in dictionary self.asic_config . This is used for configuration in asic_update. 
-        #If any changes are made, make change to self.asic_config so that it is reflected on-chip when 
+        #Chip config stored in dictionary self.asic_config . This is used for configuration in asic_update.
+        #If any changes are made, make change to self.asic_config so that it is reflected on-chip when
         # asic_update is called. Similarly with card config for GECCO cards
 
         #Sort DAC settings to idac vs vdac
@@ -157,7 +156,7 @@ class astropixRun:
             logger.info(f"enabling analog output in column {analog_col}")
             self.asic.enable_ampout_col(analog_col, inplace=False)
 
-        # Turns on injection if so desired 
+        # Turns on injection if so desired
         if self.injection_col is not None:
             self.asic.set_inj_col(self.injection_col, True)
             self.asic.set_inj_row(self.injection_row, True)
@@ -167,12 +166,13 @@ class astropixRun:
         self.asic_update()
         logger.info("ASIC SUCCESSFULLY CONFIGURED")
 
-    #Interface with asic.py 
+    #Interface with asic.py
     def enable_pixel(self, col: int, row: int):
-       self.asic.set_pixel_comparator(col, row, True)
+        print(f'ENABLING PIXEL {col} {row}')
+        self.asic.set_pixel_comparator(col, row, True)
 
     def disable_pixel(self, col: int, row: int):
-       self.asic.set_pixel_comparator(col, row, False)
+        self.asic.set_pixel_comparator(col, row, False)
 
     #Turn on injection of different pixel than the one used in _init_
     def enable_injection(self, col:int, row:int):
@@ -182,7 +182,7 @@ class astropixRun:
     # The method to write data to the asic. Called whenever somthing is changed
     # or after a group of changes are done. Taken straight from asic.py.
     def asic_update(self):
-        self.nexys.chip_reset()        
+        self.nexys.chip_reset()
         self.asic.asic_update()
 
 
@@ -206,7 +206,7 @@ class astropixRun:
             if vdac_cfg is not None:
                 for key in vdac_cfg:
                     self.asic.asic_config['vdacs'][key][1]=vdac_cfg[key]
-            else: 
+            else:
                 logger.info("update_asic_config() got no arguments, nothing to do.")
                 return None
             self.asic_update()
@@ -215,9 +215,9 @@ class astropixRun:
     def update_asic_tdac_row(self, row: int):
         self.asic.update_asic_tdacrow(row)
 
-    def enable_spi(self):
+    def enable_spi(self, nexys_spi_clkdiv=None):
         """
-        Starts spi bus. 
+        Starts spi bus.
 
         Takes no arguments, returns nothing
         """
@@ -226,8 +226,11 @@ class astropixRun:
         self.nexys.spi_reset_fpga_readout()
         # Set SPI clockdivider
         # freq = 100 MHz/spi_clkdiv
-        if self.chipversion==4: self.nexys.spi_clkdiv = 40
-        else: self.nexys.spi_clkdiv = 255
+        if nexys_spi_clkdiv is None:
+            if self.chipversion==4: self.nexys.spi_clkdiv = 40
+            else: self.nexys.spi_clkdiv = 255
+        else:
+            self.nexys.spi_clkdiv = nexys_spi_clkdiv
         self.nexys.send_routing_cmd()
         logger.info("SPI ENABLED")
 
@@ -244,7 +247,7 @@ class astropixRun:
 
 ################## Voltageboard Methods ############################
 
-# Here we intitalize the 8 DAC voltageboard in slot 4. 
+# Here we intitalize the 8 DAC voltageboard in slot 4.
     def init_voltages(self, vcal:float = .989, vsupply: float = 2.7, vthreshold:float = None, dacvals: tuple[int, list[float]] = None):
         """
         Configures voltage board
@@ -253,7 +256,7 @@ class astropixRun:
         vcal:float = 0.908 - Calibration of the voltage rails
         vsupply = 2.7 - Supply Voltage
         vthreshold:float = None - ToT threshold value. Takes precedence over dacvals if set. UNITS: mV
-        dacvals:tuple[int, list[float] - vboard dac settings. Must be fully specified if set. 
+        dacvals:tuple[int, list[float] - vboard dac settings. Must be fully specified if set.
         """
 
         # Pull relevant quantities from yml config
@@ -262,7 +265,7 @@ class astropixRun:
             default_vdac = (len(self.asic.asic_configcards['voltagecard']['dacs']), self.asic.asic_configcards['voltagecard']['dacs'])
         except KeyError: #values not included in yml
             volt_slot = 4
-            # 1=thpmos (comparator threshold voltage), 3 = Vcasc2, 4=BL, 7=Vminuspix, 8=Thpix 
+            # 1=thpmos (comparator threshold voltage), 3 = Vcasc2, 4=BL, 7=Vminuspix, 8=Thpix
             if self.chipversion == 2:
                 default_vdac = (8, [0, 0, 1.1, 1, 0, 0, 1, 1.100])
             else: #increase thpmos for v3 pmos pixels
@@ -277,7 +280,7 @@ class astropixRun:
                 vthreshold = (vthreshold/1000) + default_vdac[1][3]
                 if vthreshold > 1.5 or vthreshold < 0:
                     logger.warning("Threshold voltage out of range of sensor!")
-                    if vthreshold <= 0: 
+                    if vthreshold <= 0:
                         vthreshold = 1.100
                         logger.error("Threshold value too low, setting to default 100mV")
                 dacvals[1][-1] = vthreshold
@@ -290,6 +293,7 @@ class astropixRun:
         self.vboard.vcal = vcal
         self.vboard.vsupply = vsupply
         # Send config to the chip
+        print('Setting threshold to', self.vboard.dacvalues)
         self.vboard.update_vb()
 
     # Setup Injections
@@ -312,7 +316,7 @@ class astropixRun:
         except KeyError: #values not included in yml
             inj_slot = 3
 
-        # Fault tolerance 
+        # Fault tolerance
         if inj_voltage is not None:
             # elifs check to ensure we are not injecting a negative value because we don't have that ability
             if inj_voltage < 0:
@@ -329,13 +333,13 @@ class astropixRun:
             self.injector.vcal = self.vboard.vcal
             self.injector.vsupply = self.vboard.vsupply
             self.injector.amplitude = inj_voltage / 1000. #convert mV to V
-            
+
         # Configure injector object
         self.injector.period = inj_period
         self.injector.clkdiv = clkdiv
         self.injector.initdelay = initdelay
         self.injector.cycle = cycle
-        self.injector.pulsesperset = pulseperset       
+        self.injector.pulsesperset = pulseperset
 
     # These start and stop injecting voltage. Fairly simple.
     def start_injection(self):
@@ -344,6 +348,7 @@ class astropixRun:
         Takes no arguments and no return
         """
         self.injector.start()
+        print('Starting injections')
         logger.info("Began injection")
 
     def stop_injection(self):
@@ -404,7 +409,7 @@ class astropixRun:
 
     def get_readout(self):
         """
-        Reads hit buffer once triggered by chip 
+        Reads hit buffer once triggered by chip
         Returns bytearray
         """
         readout = self.nexys.read_spi_fifo()
@@ -412,7 +417,7 @@ class astropixRun:
 
     def get_SW_readout(self, bufferlength:int = 20):
         """
-        Reads hit buffer after pinging interupt 
+        Reads hit buffer after pinging interupt
         bufferlength:int - length of buffer to write. Multiplied by 8 to give number of bytes
         Returns bytearray
         """
@@ -441,8 +446,8 @@ class astropixRun:
 
             list_hits = self.decode.hits_from_readoutstream(readout)
             df=self.decode.decode_astropix4_hits(list_hits, printer)
-        
-        else: 
+
+        else:
             self.decode = Decode(self.asic.sampleclockperiod, nchips=self.asic.num_chips)
 
             list_hits = self.decode.hits_from_readoutstream(readout)
@@ -450,12 +455,12 @@ class astropixRun:
 
         return df
 
-    # To be called when initalizing the asic, clears the FPGAs memory 
+    # To be called when initalizing the asic, clears the FPGAs memory
     def dump_fpga(self):
         """
         Force reads out hit buffer and disposes of the output.
 
-        Does not return or take arguments. 
+        Does not return or take arguments.
         """
         readout = self.get_readout()
         del readout
@@ -465,19 +470,19 @@ class astropixRun:
 
 # Below here are internal methods used for constructing things and testing
 
-    # _test_io(): A function to read and write a register on the chip to see if 
-    # everything is working. 
-    # It takes no arguments 
+    # _test_io(): A function to read and write a register on the chip to see if
+    # everything is working.
+    # It takes no arguments
     def _test_io(self):
         try:    # Attempts to write to and read from a register
             self.nexys.write_register(0x09, 0x55, True)
             self.nexys.read_register(0x09)
             self.nexys.spi_reset_fpga_readout()
             self.nexys.sr_readback_reset()
-        except Exception: 
+        except Exception:
             raise RuntimeError("Could not read or write from astropix!")
 
-    # progress bar 
+    # progress bar
     def _wait_progress(self, seconds:int):
         for _ in tqdm(range(seconds), desc=f'Wait {seconds} s'):
             time.sleep(1)

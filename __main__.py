@@ -12,7 +12,6 @@ from AstroPix import AstroPix
 
 
 def main(args=None):
-    """Demonstrator satellite serving as prototype for new satellites"""
 
     # Get a dict of the parsed arguments
     parser = SatelliteArgumentParser(description=main.__doc__)

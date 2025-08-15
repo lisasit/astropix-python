@@ -53,6 +53,7 @@ class AstroPix(Satellite):
         self.newfilter = config.setdefault("newfilter", False)
         self.warmup = config.setdefault("warmup", True)
         self.threshold_pmos = config.setdefault("threshold_pmos", 1100)
+        self.nexys_spi_clkdiv = config.setdefault("nexys_spi_clkdiv", 255)
         if hasattr(self, 'astro'):
             self.astro.close_connection()
         self.astro = astropixRun(chipversion=self.chip_version, inject=self.inject)
@@ -66,7 +67,7 @@ class AstroPix(Satellite):
             self.log.debug(f'Enabling pixel {self.inject}')
             self.astro.enable_pixel(self.inject[1], self.inject[0])
             self.astro.init_injection(inj_voltage=self.injection_voltage, onchip=self.injection_onchip, inj_period=self.injection_period, clkdiv=self.injection_clkdiv, initdelay=self.injection_initdelay, cycle=self.injection_cycle, pulseperset=self.injection_pulsesperset)
-        self.astro.enable_spi()
+        self.astro.enable_spi(self.nexys_spi_clkdiv)
         self.astro.asic_configure()
         if self.chip_version == 4:
             self.astro.update_asic_tdac_row(0)
@@ -98,6 +99,9 @@ class AstroPix(Satellite):
             call_asic_init = True
             self.astro.asic.enable_ampout_col(self.analog)
             self.log.info(f"New analog output column: {self.analog}")
+
+        if call_asic_init:
+            self.astro.asic_init(yaml=self.chip_config, analog_col = self.analog)
 
         if "chip_version" in partial_config.get_keys():
             raise ValueError("Reconfiguring chip version is not possible")
@@ -169,6 +173,13 @@ class AstroPix(Satellite):
 
         if "injection_onchip" in partial_config.get_keys():
             raise ValueError("Reconfiguring the source of injection (on chip/through the injection board) is not possible")
+
+        if "nexys_spi_clkdiv" in partial_config.get_keys():
+            self.nexys_spi_clkdiv = partial_config["nexys_spi_clkdiv"]
+            self.log.info(f"New nexys SPI clkdiv: {self.nexys_spi_clkdiv}")
+            # self.astro.nexys.spi_reset_fpga_readout()
+            self.astro.enable_spi(self.nexys_spi_clkdiv)
+            # self.astro.nexys.spi_clkdiv = self.nexys_spi_clkdiv
 
         # if call_asic_init:
         self.log.info(f"Reinitializing the chip")
